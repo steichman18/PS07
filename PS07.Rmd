@@ -1,6 +1,6 @@
 ---
 title: "STAT/MATH 495: Problem Set 07"
-author: "WRITE YOUR NAME(S) HERE"
+author: "Sarah Teichman"
 date: "2017-10-24"
 output:
   html_document:
@@ -22,6 +22,7 @@ set.seed(76)
 library(tidyverse)
 library(broom)
 library(knitr)
+library(ROCR)
 
 train <- read_csv("data/cs-training.csv") %>% 
   rename(Id = X1)
@@ -40,26 +41,150 @@ Please indicate who you collaborated with on this assignment:
 
 
 
+# Exploratory Data Analysis
+
+Making y into a factor
+```{r}
+train$SeriousDlqin2yrs <- as.factor(train$SeriousDlqin2yrs)
+```
+
+Looking at distribution of y 
+```{r}
+train %>%
+  group_by(SeriousDlqin2yrs) %>%
+  summarise(count=n())
+```
+
+
+```{r}
+ggplot(train,aes(x=DebtRatio)) +
+  geom_density(aes(y=..density..)) + 
+  scale_x_log10() + 
+  labs(title="Distribution of Debt Ratio",
+       x="Log of Debt Ratio",
+       y="Density")
+ggplot(train,aes(x=SeriousDlqin2yrs,y=log(DebtRatio))) + 
+  geom_boxplot() + 
+  labs(title="Debt Ratio by Serious Deliquency in 2 years",
+       x="Serious Deliquency in 2 years",
+       y="Log of Debt Ratio")
+```
+
+```{r}
+ggplot(train,aes(x=age)) +
+  geom_density(aes(y=..density..)) + 
+  labs(title="Distribution of Age",
+       x="Age",
+       y="Density")
+ggplot(train,aes(x=SeriousDlqin2yrs,y=age)) + 
+  geom_boxplot() + 
+  labs(title="Age by Serious Deliquency in 2 years",
+       x="Serious Deliquency in 2 years",
+       y="Age")
+```
+
+```{r}
+ggplot(train,aes(x=MonthlyIncome)) +
+  geom_density(aes(y=..density..)) + 
+  scale_x_log10() + 
+  labs(title="Distribution of MonthlyIncome",
+       x="Log of Monthly Income",
+       y="Density")
+ggplot(train,aes(x=SeriousDlqin2yrs,y=log(MonthlyIncome))) + 
+  geom_boxplot() + 
+  labs(title="Monthly Income by Serious Deliquency in 2 years",
+       x="Serious Deliquency in 2 years",
+       y="Log of Monthly Income")
+```
+
+Based on the box-and-whisker plots, it seems that there is the biggest difference between the two groups of the y variable for age. However, it is difficult to see and the log transformation might make it even more difficult, so I created a model and computed the auc for a model using each possible predictor. 
+
 # Build binary classifier
 
 Build the binary classifier based on a single predictor variable: `DebtRatio`,
 `age`, or `MonthlyIncome`. Justify this choice.
 
 ```{r}
-
+train_debt <- train %>%
+  filter(DebtRatio!=0)
+train_inc <- train %>%
+  filter(MonthlyIncome!=0)
+model_formula_age <- as.formula(SeriousDlqin2yrs~age)
+model_formula_debt <- as.formula(SeriousDlqin2yrs~log(DebtRatio))
+model_formula_income <- as.formula(SeriousDlqin2yrs~log(MonthlyIncome))
+model_logistic_age <- glm(model_formula_age, data=train, family="binomial")
+model_logistic_debt <- glm(model_formula_debt, data=train_debt, family="binomial")
+model_logistic_income <- glm(model_formula_income, data=train_inc, family="binomial")
 ```
-
-
 
 # ROC curve
 
 Based on the ultimate classifier you choose, plot a corresponding ROC curve.
 
 ```{r}
+#AUC for age
+profiles_train_augmented <- model_logistic_age %>% 
+  broom::augment() %>% 
+  as_tibble() %>% 
+  mutate(p_hat = 1/(1+exp(-.fitted)))
 
+# This bit of code computes the ROC curve
+pred <- prediction(predictions = profiles_train_augmented$p_hat, labels = profiles_train_augmented$SeriousDlqin2yrs)
+perf <- performance(pred, "tpr","fpr")
+
+# This bit of code computes the Area Under the Curve
+auc_age <- as.numeric(performance(pred,"auc")@y.values)
+auc_age
+
+#AUC for debt 
+profiles_train_augmented <- model_logistic_debt %>% 
+  broom::augment() %>% 
+  as_tibble() %>% 
+  mutate(p_hat = 1/(1+exp(-.fitted)))
+
+# This bit of code computes the ROC curve
+pred <- prediction(predictions = profiles_train_augmented$p_hat, labels = profiles_train_augmented$SeriousDlqin2yrs)
+perf <- performance(pred, "tpr","fpr")
+
+# This bit of code computes the Area Under the Curve
+auc_debt <- as.numeric(performance(pred,"auc")@y.values)
+auc_debt
+
+#AUC for income 
+profiles_train_augmented <- model_logistic_income %>% 
+  broom::augment() %>% 
+  as_tibble() %>% 
+  mutate(p_hat = 1/(1+exp(-.fitted)))
+
+# This bit of code computes the ROC curve
+pred <- prediction(predictions = profiles_train_augmented$p_hat, labels = profiles_train_augmented$SeriousDlqin2yrs)
+perf <- performance(pred, "tpr","fpr")
+
+# This bit of code computes the Area Under the Curve
+auc_inc <- as.numeric(performance(pred,"auc")@y.values)
+auc_inc
 ```
 
+Comparing the auc values shows that age is indeed the best predictor. 
 
+```{r}
+profiles_train_augmented <- model_logistic_age %>% 
+  broom::augment() %>% 
+  as_tibble() %>% 
+  mutate(p_hat = 1/(1+exp(-.fitted)))
+
+# This bit of code computes the ROC curve
+pred <- prediction(predictions = profiles_train_augmented$p_hat, labels = profiles_train_augmented$SeriousDlqin2yrs)
+perf <- performance(pred, "tpr","fpr")
+
+# This bit of code computes the Area Under the Curve
+auc <- as.numeric(performance(pred,"auc")@y.values)
+auc
+
+# This bit of code prints it
+plot(perf, main=paste("Area Under the Curve =", round(auc, 3)))
+abline(c(0, 1), lty=2)
+```
 
 # ROC curve for random guessing
 
@@ -67,5 +192,31 @@ Instead of using any predictor information as you did above, switch your
 predictions to random guesses and plot the resulting ROC curve.
 
 ```{r}
+profiles_train_augmented <- model_logistic_age %>% 
+  broom::augment() %>% 
+  as_tibble() %>% 
+  mutate(p_hat = 1/(1+exp(-.fitted)))
 
+pred <- prediction(predictions = sample(profiles_train_augmented$p_hat), labels = profiles_train_augmented$SeriousDlqin2yrs)
+perf <- performance(pred, "tpr","fpr")
+
+# This bit of code computes the Area Under the Curve
+auc <- as.numeric(performance(pred,"auc")@y.values)
+auc
+
+# This bit of code prints it
+plot(perf, main=paste("Area Under the Curve =", round(auc, 3)))
+abline(c(0, 1), lty=2)
+```
+
+
+# Create submission file
+
+```{r}
+pred <- data.frame(predict(model_logistic_age,test))
+pred_df <- pred %>%
+  mutate(p_hat = 1/(1+exp(-predict.model_logistic_age..test.)))
+submission <- data.frame(test$Id, pred_df$p_hat)
+names(submission) <- c("Id", "Probability")
+write.csv(submission, "submission.csv", row.names=FALSE)
 ```
